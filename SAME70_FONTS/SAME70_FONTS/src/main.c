@@ -27,6 +27,9 @@ volatile char string_dist[32];
 volatile char string_time[32];
 volatile int counter_seg;
 volatile int counter_min;
+volatile Bool f_rtt_alarme = false;
+volatile int voltas = 0;
+volatile float distancia = 0;
 
 // Configuracoes do botao
 // Botão1
@@ -43,91 +46,65 @@ volatile int counter_min;
 
 struct ili9488_opt_t g_ili9488_display_opt;
 
+static void RTT_init(uint16_t pllPreScale, uint32_t IrqNPulses);
+
+float calcula_velocidade(int n){
+	float a = 0.325 * 2.0 * 3.14 * (float) n;
+	distancia += a;
+	return a * 3.6 / 4 ;
+}
+
 /* CALLBACKS */
 void but1_callback(void)
 {
-	sprintf(string_vel, "%d", 10);
+	
 }
 
 void but2_callback(void)
 {
-	
+	voltas += 1;
 }
 
-void TC1_Handler(void){
-	volatile uint32_t ul_dummy;
-	/****************************************************************
-	* Devemos indicar ao TC que a interrupção foi satisfeita.
-	******************************************************************/
-	ul_dummy = tc_get_status(TC0, 1);
-
-	/* Avoid compiler warning */
-	UNUSED(ul_dummy);
-
-}
-
-void RTC_Handler(void)
-{
-	uint32_t ul_status = rtc_get_status(RTC);
-	/*
-	*  Verifica por qual motivo entrou
-	*  na interrupcao, se foi por segundo
-	*  ou Alarm
-	*/
-	if ((ul_status & RTC_SR_SEC) == RTC_SR_SEC) {
-		rtc_clear_status(RTC, RTC_SCCR_SECCLR);
+void RTC_Handler(void){
+	counter_seg += 1;
+	if (counter_seg == 60){
+		counter_seg = 00;
+		counter_min += 1;
+		
 	}
-	/* Time or date alarm */
-	if ((ul_status & RTC_SR_ALARM) == RTC_SR_ALARM) {
-		
-		uint32_t a = 0;
-		uint32_t b = 0;
-		uint32_t c = 0;
-		
-		// tempo da ruim quando c > 50
-		// se c > 50: b += 1 e c =0;
-		
-		rtc_set_date_alarm(RTC, 1, MOUNTH, 1, DAY);
-		rtc_get_time(RTC, &a, &b, &c);
-		rtc_set_time_alarm(RTC, 1, a, 1, b, 1, c+1);
-		rtc_clear_status(RTC, RTC_SCCR_ALRCLR);
-		
-		counter_seg += 1;
-		if (counter_seg == 60){
-			counter_seg = 0;
-			counter_min += 1;	
-		}
-		sprintf(string_time, "%d:%d", counter_seg, counter_min);
-	}
+	sprintf(string_time, "%d:%d", counter_min, counter_seg);
 	
+	rtc_set_time(RTC, HOUR, MINUTE, SECOND);
+	rtc_set_date_alarm(RTC, 1, MOUNTH, 1, DAY);
+	rtc_set_time_alarm(RTC, 1, HOUR, 1, MINUTE, 1, SECOND+1);
+	
+	rtc_clear_status(RTC, RTC_SCCR_ALRCLR);	
 	rtc_clear_status(RTC, RTC_SCCR_ACKCLR);
 	rtc_clear_status(RTC, RTC_SCCR_TIMCLR);
 	rtc_clear_status(RTC, RTC_SCCR_CALCLR);
-	rtc_clear_status(RTC, RTC_SCCR_TDERRCLR);
-	
+	rtc_clear_status(RTC, RTC_SCCR_TDERRCLR);	
 }
 
-void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq){
-	uint32_t ul_div;
-	uint32_t ul_tcclks;
-	uint32_t ul_sysclk = sysclk_get_cpu_hz();
-	uint32_t channel = 1;
-	
-	pmc_enable_periph_clk(ID_TC);
+void RTT_Handler(void)
+{
+	  uint32_t ul_status;
 
-	/** Configura o TC para operar em  4hz e interrupçcão no RC compare */
-	tc_find_mck_divisor(freq, ul_sysclk, &ul_div, &ul_tcclks, ul_sysclk);
-	tc_init(TC, TC_CHANNEL, ul_tcclks | TC_CMR_CPCTRG);
-	tc_write_rc(TC, TC_CHANNEL, (ul_sysclk / ul_div) / freq);
+	  /* Get RTT status */
+	  ul_status = rtt_get_status(RTT);
 
-	/* Configura e ativa interrupçcão no TC canal 0 */
-	/* Interrupção no C */
-	NVIC_EnableIRQ((IRQn_Type) ID_TC);
-	tc_enable_interrupt(TC, TC_CHANNEL, TC_IER_CPCS);
+	  /* IRQ due to Time has changed */
+	  if ((ul_status & RTT_SR_RTTINC) == RTT_SR_RTTINC) {  }
 
-	/* Inicializa o canal 0 do TC */
-	tc_start(TC, TC_CHANNEL);
+	  /* IRQ due to Alarm */
+	  if ((ul_status & RTT_SR_ALMS) == RTT_SR_ALMS) {
+		  f_rtt_alarme = true;                  
+		  sprintf(string_vel, "%f", calcula_velocidade(voltas));
+		  sprintf(string_dist, "%f", distancia);
+	 }
+  voltas = 0;
 }
+
+/* INIT */
 
 void RTC_init(){
 	/* Configura o PMC */
@@ -148,8 +125,33 @@ void RTC_init(){
 
 	/* Ativa interrupcao via alarme */
 	rtc_enable_interrupt(RTC,  RTC_IER_ALREN);
-
 }
+
+static float get_time_rtt(){
+  uint ul_previous_time = rtt_read_timer_value(RTT); 
+}
+
+static void RTT_init(uint16_t pllPreScale, uint32_t IrqNPulses)
+{
+  uint32_t ul_previous_time;
+
+  /* Configure RTT for a 1 second tick interrupt */
+  rtt_sel_source(RTT, false);
+  rtt_init(RTT, pllPreScale);
+  
+  ul_previous_time = rtt_read_timer_value(RTT);
+  while (ul_previous_time == rtt_read_timer_value(RTT));
+  
+  rtt_write_alarm_time(RTT, IrqNPulses+ul_previous_time);
+
+  /* Enable RTT interrupt */
+  NVIC_DisableIRQ(RTT_IRQn);
+  NVIC_ClearPendingIRQ(RTT_IRQn);
+  NVIC_SetPriority(RTT_IRQn, 0);
+  NVIC_EnableIRQ(RTT_IRQn);
+  rtt_enable_interrupt(RTT, RTT_MR_ALMIEN);
+}
+
 
 void configure_lcd(void){
 	/* Initialize display parameter */
@@ -166,8 +168,6 @@ void init(void){
 	board_init();
 	sysclk_init();
 	RTC_init();
-	
-	TC_init(TC0, ID_TC1, 1, 10);
 	
 	// Desativa watchdog
 	WDT->WDT_MR = WDT_MR_WDDIS;
@@ -190,6 +190,8 @@ void init(void){
 	// Ativa interrupção
 	pio_enable_interrupt(BUT1_PIO, BUT1_IDX_MASK);
 	pio_enable_interrupt(BUT2_PIO, BUT2_IDX_MASK);
+	
+	pio_set_debounce_filter(BUT2_PIO, BUT2_IDX_MASK, 20);
 	
 	// Configura NVIC para receber interrupcoes do PIO do botao
 	// com prioridade 4 (quanto mais próximo de 0 maior)
@@ -214,26 +216,32 @@ void font_draw_text(tFont *font, const char *text, int x, int y, int spacing) {
 	}	
 }
 
-int calcula_velocidade(int n){
-	return 2*3.14*raio*3.6;
-}
-
 int main(void) {
 	init();
 	configure_lcd();
+	
+	rtc_set_date_alarm(RTC, 1, MOUNTH, 1, DAY);
+	rtc_set_time_alarm(RTC, 1, HOUR, 1, MINUTE, 1, SECOND+1);
+	
+	uint16_t pllPreScale = (int) (((float) 32768) / 2.0);
+	uint32_t irqRTTvalue = 8;
+	f_rtt_alarme = true;
 	
 	sprintf(string_vel, "%d", 0);
 	sprintf(string_dist, "%d", 0);
 	sprintf(string_time, "%d:%d", 0, 0);
 	
-	font_draw_text(&calibri_36, "Velocidade (km/h)", 10, 50, 1);
-	font_draw_text(&calibri_36, "Distancia (m)", 10, 200, 1);
-	font_draw_text(&calibri_36, "Tempo", 10, 350, 1);
-	
-	rtc_set_date_alarm(RTC, 1, MOUNTH, 1, DAY);
-	rtc_set_time_alarm(RTC, 1, HOUR, 1, MINUTE, 1, SECOND+1);
+	voltas = 0;
 	
 	while(1) {
+		if (f_rtt_alarme){
+			RTT_init(pllPreScale, irqRTTvalue);         
+			f_rtt_alarme = false;
+			ili9488_draw_filled_rectangle(0, 0, ILI9488_LCD_WIDTH-1, ILI9488_LCD_HEIGHT-1);
+		}
+		font_draw_text(&calibri_36, "Velocidade (km/h)", 10, 50, 1);
+		font_draw_text(&calibri_36, "Distancia (m)", 10, 200, 1);
+		font_draw_text(&calibri_36, "Tempo", 10, 350, 1);
 		font_draw_text(&calibri_36, string_vel, 10, 100, 1);
 		font_draw_text(&calibri_36, string_dist, 10, 250, 1);
 		font_draw_text(&calibri_36, string_time, 10, 400, 1);
