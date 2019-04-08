@@ -25,6 +25,8 @@
 volatile char string_vel[32];
 volatile char string_dist[32];
 volatile char string_time[32];
+volatile int counter_seg;
+volatile int counter_min;
 
 // Configuracoes do botao
 // Botão1
@@ -52,6 +54,103 @@ void but2_callback(void)
 	
 }
 
+void TC1_Handler(void){
+	volatile uint32_t ul_dummy;
+	/****************************************************************
+	* Devemos indicar ao TC que a interrupção foi satisfeita.
+	******************************************************************/
+	ul_dummy = tc_get_status(TC0, 1);
+
+	/* Avoid compiler warning */
+	UNUSED(ul_dummy);
+
+}
+
+void RTC_Handler(void)
+{
+	uint32_t ul_status = rtc_get_status(RTC);
+	/*
+	*  Verifica por qual motivo entrou
+	*  na interrupcao, se foi por segundo
+	*  ou Alarm
+	*/
+	if ((ul_status & RTC_SR_SEC) == RTC_SR_SEC) {
+		rtc_clear_status(RTC, RTC_SCCR_SECCLR);
+	}
+	/* Time or date alarm */
+	if ((ul_status & RTC_SR_ALARM) == RTC_SR_ALARM) {
+		
+		uint32_t a = 0;
+		uint32_t b = 0;
+		uint32_t c = 0;
+		
+		// tempo da ruim quando c > 50
+		// se c > 50: b += 1 e c =0;
+		
+		rtc_set_date_alarm(RTC, 1, MOUNTH, 1, DAY);
+		rtc_get_time(RTC, &a, &b, &c);
+		rtc_set_time_alarm(RTC, 1, a, 1, b, 1, c+1);
+		rtc_clear_status(RTC, RTC_SCCR_ALRCLR);
+		
+		counter_seg += 1;
+		if (counter_seg == 60){
+			counter_seg = 0;
+			counter_min += 1;	
+		}
+		sprintf(string_time, "%d:%d", counter_seg, counter_min);
+	}
+	
+	rtc_clear_status(RTC, RTC_SCCR_ACKCLR);
+	rtc_clear_status(RTC, RTC_SCCR_TIMCLR);
+	rtc_clear_status(RTC, RTC_SCCR_CALCLR);
+	rtc_clear_status(RTC, RTC_SCCR_TDERRCLR);
+	
+}
+
+void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq){
+	uint32_t ul_div;
+	uint32_t ul_tcclks;
+	uint32_t ul_sysclk = sysclk_get_cpu_hz();
+	uint32_t channel = 1;
+	
+	pmc_enable_periph_clk(ID_TC);
+
+	/** Configura o TC para operar em  4hz e interrupçcão no RC compare */
+	tc_find_mck_divisor(freq, ul_sysclk, &ul_div, &ul_tcclks, ul_sysclk);
+	tc_init(TC, TC_CHANNEL, ul_tcclks | TC_CMR_CPCTRG);
+	tc_write_rc(TC, TC_CHANNEL, (ul_sysclk / ul_div) / freq);
+
+	/* Configura e ativa interrupçcão no TC canal 0 */
+	/* Interrupção no C */
+	NVIC_EnableIRQ((IRQn_Type) ID_TC);
+	tc_enable_interrupt(TC, TC_CHANNEL, TC_IER_CPCS);
+
+	/* Inicializa o canal 0 do TC */
+	tc_start(TC, TC_CHANNEL);
+}
+
+void RTC_init(){
+	/* Configura o PMC */
+	pmc_enable_periph_clk(ID_RTC);
+
+	/* Default RTC configuration, 24-hour mode */
+	rtc_set_hour_mode(RTC, 0);
+
+	/* Configura data e hora manualmente */
+	rtc_set_date(RTC, YEAR, MOUNTH, DAY, WEEK);
+	rtc_set_time(RTC, HOUR, MINUTE, SECOND);
+
+	/* Configure RTC interrupts */
+	NVIC_DisableIRQ(RTC_IRQn);
+	NVIC_ClearPendingIRQ(RTC_IRQn);
+	NVIC_SetPriority(RTC_IRQn, 0);
+	NVIC_EnableIRQ(RTC_IRQn);
+
+	/* Ativa interrupcao via alarme */
+	rtc_enable_interrupt(RTC,  RTC_IER_ALREN);
+
+}
+
 void configure_lcd(void){
 	/* Initialize display parameter */
 	g_ili9488_display_opt.ul_width = ILI9488_LCD_WIDTH;
@@ -66,6 +165,9 @@ void configure_lcd(void){
 void init(void){
 	board_init();
 	sysclk_init();
+	RTC_init();
+	
+	TC_init(TC0, ID_TC1, 1, 10);
 	
 	// Desativa watchdog
 	WDT->WDT_MR = WDT_MR_WDDIS;
@@ -121,16 +223,20 @@ int main(void) {
 	configure_lcd();
 	
 	sprintf(string_vel, "%d", 0);
-	sprintf(string_time, "%d", 0);
 	sprintf(string_dist, "%d", 0);
+	sprintf(string_time, "%d:%d", 0, 0);
 	
 	font_draw_text(&calibri_36, "Velocidade (km/h)", 10, 50, 1);
 	font_draw_text(&calibri_36, "Distancia (m)", 10, 200, 1);
-	font_draw_text(&calibri_36, "Tempo (seg)", 10, 350, 1);
+	font_draw_text(&calibri_36, "Tempo", 10, 350, 1);
+	
+	rtc_set_date_alarm(RTC, 1, MOUNTH, 1, DAY);
+	rtc_set_time_alarm(RTC, 1, HOUR, 1, MINUTE, 1, SECOND+1);
 	
 	while(1) {
 		font_draw_text(&calibri_36, string_vel, 10, 100, 1);
 		font_draw_text(&calibri_36, string_dist, 10, 250, 1);
 		font_draw_text(&calibri_36, string_time, 10, 400, 1);
+		pmc_sleep(SAM_PM_SMODE_SLEEP_WFI);
 	}
 }
