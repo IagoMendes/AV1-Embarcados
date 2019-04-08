@@ -44,7 +44,7 @@ struct ili9488_opt_t g_ili9488_display_opt;
 /* CALLBACKS */
 void but1_callback(void)
 {
-	sprintf(string_vel, "Velocidade: %dkm/h", 10);
+	sprintf(string_vel, "%d", 10);
 }
 
 void but2_callback(void)
@@ -120,13 +120,17 @@ int main(void) {
 	init();
 	configure_lcd();
 	
-	sprintf(string_vel, "Velocidade: %d km/h", 0);
-	sprintf(string_time, "Tempo: %d", 0);
-	sprintf(string_dist, "Distância: %d", 0);
+	sprintf(string_vel, "%d", 0);
+	sprintf(string_time, "%d", 0);
+	sprintf(string_dist, "%d", 0);
+	
+	font_draw_text(&calibri_36, "Velocidade (km/h)", 10, 50, 1);
+	font_draw_text(&calibri_36, "Distancia (m)", 10, 200, 1);
+	font_draw_text(&calibri_36, "Tempo (seg)", 10, 350, 1);
 	
 	while(1) {
 		font_draw_text(&calibri_36, string_vel, 10, 100, 1);
-		font_draw_text(&calibri_36, string_dist, 10, 200, 1);
-		font_draw_text(&calibri_36, string_time, 10, 300, 1);
+		font_draw_text(&calibri_36, string_dist, 10, 250, 1);
+		font_draw_text(&calibri_36, string_time, 10, 400, 1);
 	}
 }
