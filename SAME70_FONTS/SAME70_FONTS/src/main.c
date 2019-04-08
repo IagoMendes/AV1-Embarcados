@@ -11,6 +11,22 @@
 #include "calibri_36.h"
 #include "arial_72.h"
 
+/* Defines */
+#define YEAR        2018
+#define MOUNTH      3
+#define DAY         19
+#define WEEK        12
+#define HOUR        15
+#define MINUTE      45
+#define SECOND      0
+
+#define raio 65/2
+
+// Configuracoes do botao
+#define BUT_PIO			PIOA
+#define BUT_PIO_ID		10
+#define BUT_PIO_IDX		11u
+#define BUT_PIO_IDX_MASK (1u << BUT_PIO_IDX)
 
 struct ili9488_opt_t g_ili9488_display_opt;
 
@@ -20,13 +36,10 @@ void configure_lcd(void){
 	g_ili9488_display_opt.ul_height = ILI9488_LCD_HEIGHT;
 	g_ili9488_display_opt.foreground_color = COLOR_CONVERT(COLOR_WHITE);
 	g_ili9488_display_opt.background_color = COLOR_CONVERT(COLOR_WHITE);
-
 	/* Initialize LCD */
 	ili9488_init(&g_ili9488_display_opt);
 	ili9488_draw_filled_rectangle(0, 0, ILI9488_LCD_WIDTH-1, ILI9488_LCD_HEIGHT-1);
-	
 }
-
 
 void font_draw_text(tFont *font, const char *text, int x, int y, int spacing) {
 	char *p = text;
@@ -42,15 +55,18 @@ void font_draw_text(tFont *font, const char *text, int x, int y, int spacing) {
 	}	
 }
 
+int calcula_velocidade(int n){
+	return 2*3.14*raio
+}
 
 int main(void) {
 	board_init();
 	sysclk_init();	
 	configure_lcd();
 	
-	font_draw_text(&sourcecodepro_28, "OIMUNDO", 50, 50, 1);
-	font_draw_text(&calibri_36, "Oi Mundo! #$!@", 50, 100, 1);
-	font_draw_text(&arial_72, "102456", 50, 200, 2);
+	//font_draw_text(&sourcecodepro_28, "OIMUNDO", 50, 50, 1);
+	font_draw_text(&calibri_36, "Oi Mundo!" , 50, 100, 1);
+	//font_draw_text(&arial_72, "102456", 50, 200, 2);
 	while(1) {
 		
 	}
